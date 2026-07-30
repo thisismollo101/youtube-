@@ -8,7 +8,7 @@
 #   WV_THRESHOLD  scene-detection sensitivity      (default: auto-calibrated)
 #   WV_MIN_SHOT   merge shots shorter than this    (default 0.40s)
 #   WV_MAX_SHEETS overall frame budget, in sheets   (default 20)
-#   WV_SEC_PER_FRAME seconds of shot per sampled frame (default 1.2)
+#   WV_SEC_PER_FRAME seconds of shot per sampled frame (default 1.0)
 #   WHISPER_MODEL ggml model path for the fallback transcript
 set -euo pipefail
 
@@ -19,7 +19,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 THRESHOLD="${WV_THRESHOLD:-auto}"
 MIN_SHOT="${WV_MIN_SHOT:-0.40}"
 MAX_SHEETS="${WV_MAX_SHEETS:-20}"
-SEC_PER_FRAME="${WV_SEC_PER_FRAME:-1.2}"   # one sampled frame per this many seconds of shot
+SEC_PER_FRAME="${WV_SEC_PER_FRAME:-1.0}"   # one sampled frame per this many seconds of shot
 
 CELL_W=500        # shot-sheet cell width; the legibility floor found by testing
 CAST_W=300        # cast-sheet cells can be smaller — identify, not read
@@ -135,7 +135,9 @@ PER_SHEET=$(( 3 * ROWS ))                       # frames one sheet can hold
 MAX_FRAMES=$(( MAX_SHEETS * PER_SHEET ))
 awk -F'\t' -v spf="$SEC_PER_FRAME" -v maxf="$MAX_FRAMES" '
   { idx[NR]=$1; st[NR]=$2; en[NR]=$3; du[NR]=$4
-    n=int(du[NR]/spf + 0.5); if(n<2)n=2; if(n>12)n=12; nf[NR]=n; tot+=n }
+    # No tight per-shot ceiling: the global budget below handles totals, and it
+    # scales every shot proportionally instead of truncating the longest one.
+    n=int(du[NR]/spf + 0.5); if(n<2)n=2; if(n>40)n=40; nf[NR]=n; tot+=n }
   END{
     # Over budget: scale every shot back proportionally but never below 2, so
     # long shots still keep the largest share rather than being dropped.

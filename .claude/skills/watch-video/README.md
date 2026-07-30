@@ -29,9 +29,11 @@ optional fallback used only when a video has no captions.
    0.06. A fixed 0.30 reports that second video as one 13-second shot. Fragments under
    `WV_MIN_SHOT` are merged so a flash frame doesn't become five phantom shots, and cut
    statistics come from here, so pacing is measured rather than guessed.
-3. **Sample** — frames per shot scale with the shot's length (about one per 1.2s, 2–12). A fixed
-   count spends the budget backwards: a 9.7s shot and a 1.1s insert would get identical coverage,
-   so the shot carrying the most action gets seen least.
+3. **Sample** — one frame per second of shot, so coverage tracks content. A fixed count per shot
+   spends the budget backwards: a 9.7s shot and a 1.1s insert would get identical coverage, so
+   the shot carrying the most action gets seen least. There is deliberately no tight per-shot
+   ceiling — a low cap re-creates the same inversion on long takes. Totals are bounded by the
+   global budget instead, which scales every shot proportionally rather than truncating one.
 4. **Tile** — **one sheet per shot**, gridded to that shot's frame count, so a long shot reads as
    a sequence. Geometry is derived from the source aspect ratio.
 5. **Transcribe** — platform captions if they exist, `whisper-cli` if not, and an explicit "none"
@@ -84,7 +86,7 @@ regenerate that shot. The same data is emitted as JSON using the library's field
 | `WV_THRESHOLD` | auto | Auto-calibrated per video. Override only to force a value. |
 | `WV_MIN_SHOT` | `0.40` | Flashes or whip-pans splitting into fragments → raise. |
 | `WV_MAX_SHEETS` | `20` | Overall frame budget. Long video scaled back and you want fuller coverage → raise. |
-| `WV_SEC_PER_FRAME` | `1.2` | Seconds of shot per sampled frame. Lower for denser coverage. |
+| `WV_SEC_PER_FRAME` | `1.0` | Seconds of shot per sampled frame. Lower for denser coverage. |
 | `WV_FONT` | auto-detected | No usable system font found. |
 | `WHISPER_MODEL` | `~/.claude/models/ggml-base.en.bin` | Local transcription fallback. |
 
