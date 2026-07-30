@@ -5,7 +5,7 @@
 #   prepare.sh <URL|path> [workdir]
 #
 # Prints the manifest path on the last line. Tunables:
-#   WV_THRESHOLD  scene-detection sensitivity      (default 0.30)
+#   WV_THRESHOLD  scene-detection sensitivity      (default: auto-calibrated)
 #   WV_MIN_SHOT   merge shots shorter than this    (default 0.40s)
 #   WV_MAX_SHEETS cap on 3-frame shot sheets       (default 20)
 #   WHISPER_MODEL ggml model path for the fallback transcript
@@ -15,7 +15,7 @@ SRC="${1:-}"
 [ -n "$SRC" ] || { echo "usage: prepare.sh <URL|path> [workdir]" >&2; exit 2; }
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-THRESHOLD="${WV_THRESHOLD:-0.30}"
+THRESHOLD="${WV_THRESHOLD:-auto}"
 MIN_SHOT="${WV_MIN_SHOT:-0.40}"
 MAX_SHEETS="${WV_MAX_SHEETS:-20}"
 
@@ -111,13 +111,18 @@ export WV_BB=$(awk -v f="$WV_FS" 'BEGIN{b=int(f/5); if(b<3)b=3; print b}')
 
 # ------------------------------------------------------------ detect shots
 echo "[2/6] detecting shots" >&2
+# One decode pass collects every frame's scene score above the noise gate; the
+# threshold is then chosen from that distribution instead of being guessed.
 ffmpeg -nostdin -loglevel info -i "$WORK/video.mp4" \
-  -filter:v "select='gt(scene,${THRESHOLD})',showinfo" -f null - 2>&1 \
-  | grep -o 'pts_time:[0-9.]*' | cut -d: -f2 > "$WORK/cuts.txt" || true
+  -filter:v "select='gt(scene,0.01)',metadata=print" -f null - 2>&1 \
+  | grep -oE 'pts_time:[0-9.]+|lavfi.scene_score=[0-9.]+' | paste - - \
+  | sed -E 's/pts_time:([0-9.]+)\tlavfi\.scene_score=([0-9.]+)/\1 \2/' > "$WORK/scores.txt" || true
 
-SHOT_COUNT=$(python3 "$HERE/align.py" shots \
-  --cuts "$WORK/cuts.txt" --duration "$DUR" --min-dur "$MIN_SHOT" --out "$WORK/shots.tsv")
-echo "      $SHOT_COUNT shots" >&2
+SHOT_COUNT=$(python3 "$HERE/align.py" shots --scores "$WORK/scores.txt" \
+  --threshold "$THRESHOLD" --duration "$DUR" --min-dur "$MIN_SHOT" --out "$WORK/shots.tsv")
+THRESHOLD_USED=$(cut -f1 "$WORK/threshold.txt" 2>/dev/null || echo "$THRESHOLD")
+THRESHOLD_WHY=$(cut -f2 "$WORK/threshold.txt" 2>/dev/null || echo "")
+echo "      $SHOT_COUNT shots (threshold $THRESHOLD_USED — $THRESHOLD_WHY)" >&2
 
 # ------------------------------------------------------- pick sampling plan
 MAX_3F=$(( MAX_SHEETS * ROWS ))
@@ -213,7 +218,7 @@ echo "[6/6] writing manifest" >&2
 python3 "$HERE/align.py" report \
   --workdir "$WORK" --shots "$WORK/shots.tsv" --captions "$CAPS" \
   --transcript-source "$TSOURCE" --source "$SRC" --duration "$DUR" \
-  --width "$W" --height "$H" --threshold "$THRESHOLD" --min-dur "$MIN_SHOT" \
+  --width "$W" --height "$H" --threshold "$THRESHOLD_USED ($THRESHOLD_WHY)" --min-dur "$MIN_SHOT" \
   --capped-note "$CAPPED_NOTE" >&2
 
 echo "$WORK/manifest.md"

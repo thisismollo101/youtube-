@@ -8,7 +8,7 @@ Two subcommands:
 Kept separate from prepare.sh because VTT parsing and timestamp-overlap
 alignment in awk is a bad time.
 """
-import argparse, os, re, statistics, sys
+import argparse, math, os, re, statistics, sys
 
 
 # ----------------------------------------------------------------- shots
@@ -34,19 +34,73 @@ def build_shots(cuts, duration, min_dur):
     return [(i + 1, s, e) for i, (s, e) in enumerate(shots)]
 
 
+def pick_threshold(scores):
+    """Find the cut threshold from the score distribution rather than guessing.
+
+    Real cuts sit far above the per-frame noise floor, but *how* far depends
+    entirely on the footage: a bright hard-cut promo scores cuts at 0.85 against
+    0.03 noise, while a dark, warm, low-contrast ad scores its cuts at 0.28
+    against 0.06. One fixed default cannot serve both — at 0.30 the second video
+    reports a single 13-second shot, which is silently wrong.
+
+    So: sort descending, find the largest multiplicative gap, and split there.
+    """
+    vals = sorted((s for _, s in scores), reverse=True)
+    if len(vals) < 4:
+        return DEFAULT_THRESHOLD, "too few scored frames"
+
+    # A video is not more than a third cuts, and anything under the floor is
+    # noise, not a candidate boundary.
+    # Wide enough to reach past the cuts into the noise on a short or very
+    # static clip, where only a handful of frames clear the gate at all.
+    limit = min(len(vals) - 1, max(30, len(vals) // 3, 400))
+    best_ratio, best_i = 0.0, None
+    for i in range(limit - 1):
+        hi, lo = vals[i], vals[i + 1]
+        if hi < NOISE_FLOOR:
+            break
+        if lo <= 0:
+            continue
+        r = hi / lo
+        if r > best_ratio:
+            best_ratio, best_i = r, i
+
+    if best_i is None or best_ratio < MIN_GAP_RATIO:
+        # No clean separation — either a single continuous take or a dissolve-
+        # heavy edit with no hard cuts. Fall back rather than invent boundaries.
+        return DEFAULT_THRESHOLD, f"no clear gap (best ratio {best_ratio:.1f}x)"
+
+    thr = math.sqrt(vals[best_i] * vals[best_i + 1])
+    thr = min(max(thr, 0.05), 0.60)
+    return thr, f"{best_i + 1} cuts above a {best_ratio:.1f}x gap"
+
+
+DEFAULT_THRESHOLD = 0.30
+NOISE_FLOOR = 0.05
+MIN_GAP_RATIO = 2.0
+
+
 def cmd_shots(a):
-    cuts = []
-    if os.path.exists(a.cuts):
-        with open(a.cuts) as fh:
+    scores = []
+    if os.path.exists(a.scores):
+        with open(a.scores) as fh:
             for line in fh:
-                line = line.strip()
-                if line:
+                parts = line.split()
+                if len(parts) == 2:
                     try:
-                        cuts.append(float(line))
+                        scores.append((float(parts[0]), float(parts[1])))
                     except ValueError:
                         pass
 
+    if a.threshold == "auto":
+        thr, why = pick_threshold(scores)
+    else:
+        thr, why = float(a.threshold), "set by WV_THRESHOLD"
+
+    cuts = [t for t, s in scores if s > thr]
     shots = build_shots(cuts, a.duration, a.min_dur)
+    with open(os.path.join(os.path.dirname(a.out), "threshold.txt"), "w") as fh:
+        fh.write(f"{thr:.4f}\t{why}\n")
     with open(a.out, "w") as fh:
         for idx, start, end in shots:
             fh.write(f"{idx}\t{start:.3f}\t{end:.3f}\t{end - start:.3f}\n")
@@ -202,7 +256,8 @@ p = argparse.ArgumentParser()
 sub = p.add_subparsers(dest="cmd", required=True)
 
 ps = sub.add_parser("shots")
-ps.add_argument("--cuts", required=True)
+ps.add_argument("--scores", required=True)
+ps.add_argument("--threshold", default="auto")
 ps.add_argument("--duration", type=float, required=True)
 ps.add_argument("--min-dur", type=float, default=0.4)
 ps.add_argument("--out", required=True)

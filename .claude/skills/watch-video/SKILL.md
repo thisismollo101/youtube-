@@ -111,7 +111,7 @@ that too rather than inventing dialogue.
 
 | Variable | Default | Use when |
 |---|---|---|
-| `WV_THRESHOLD` | `0.30` | Cuts missed → lower (`0.20`). Phantom cuts on fast motion → raise (`0.40`). |
+| `WV_THRESHOLD` | auto | Auto-calibrated per video. Override only to force a value. |
 | `WV_MIN_SHOT` | `0.40` | Flashes/whip-pans splitting into fragments → raise. |
 | `WV_MAX_SHEETS` | `20` | Long video capped and you want full 3-frame coverage → raise. |
 | `WHISPER_MODEL` | `~/.claude/models/ggml-base.en.bin` | Local transcription fallback. |

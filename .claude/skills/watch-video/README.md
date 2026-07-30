@@ -22,9 +22,13 @@ optional fallback used only when a video has no captions.
 
 1. **Fetch** — `yt-dlp` pulls the video *and* its captions in one pass. Local files are copied,
    and a sidecar `.vtt`/`.srt` next to the file is picked up automatically.
-2. **Detect shots** — ffmpeg scene detection gives real cut points; fragments under `WV_MIN_SHOT`
-   are merged so a flash frame doesn't become five phantom shots. Cut statistics come from here,
-   so pacing is measured rather than guessed.
+2. **Detect shots** — one decode pass collects every frame's scene score, and the cut threshold
+   is picked from that distribution: real cuts sit far above the noise floor, so the largest
+   multiplicative gap splits them. This matters because no fixed value works — a bright promo
+   scores its cuts at 0.85 against 0.03 noise, while a dark, warm ad scores its at 0.28 against
+   0.06. A fixed 0.30 reports that second video as one 13-second shot. Fragments under
+   `WV_MIN_SHOT` are merged so a flash frame doesn't become five phantom shots, and cut
+   statistics come from here, so pacing is measured rather than guessed.
 3. **Sample** — three frames per shot (start / middle / end). One frame per cut cannot show what
    happens *within* a shot, which is what makes camera movement readable.
 4. **Tile** — frames go onto contact sheets with **one shot per row**, columns left-to-right in
@@ -76,7 +80,7 @@ regenerate that shot. The same data is emitted as JSON using the library's field
 
 | Variable | Default | Use when |
 |---|---|---|
-| `WV_THRESHOLD` | `0.30` | Cuts missed → lower. Phantom cuts on fast motion → raise. |
+| `WV_THRESHOLD` | auto | Auto-calibrated per video. Override only to force a value. |
 | `WV_MIN_SHOT` | `0.40` | Flashes or whip-pans splitting into fragments → raise. |
 | `WV_MAX_SHEETS` | `20` | Long video capped and you want full 3-frame coverage → raise. |
 | `WV_FONT` | auto-detected | No usable system font found. |
