@@ -98,8 +98,28 @@ first frame and the last, and a breakdown that ignores that is a caption, not a 
 - **Carry continuity between shots.** Props and actions often continue across a cut — a whip-pan
   out of one shot and into the next, an object carried through. Note it; it is exactly what a
   reskin needs to preserve.
+- **Never infer someone's role from their clothing.** Read it from position and behaviour: which
+  side of a counter or bar they stand on, whether they wear a uniform, name badge or lanyard,
+  whether they are serving or being served, whether they carry luggage or handle it. Staff and
+  customers are routinely dressed alike, and getting it backwards changes what the scene *is* —
+  a colleague behind a desk makes a workplace scene, a customer in front of it makes a service
+  one. More frames will not catch this; every frame shows the same thing. Look closer instead.
 - **Flag what you couldn't see.** Thin coverage, an ambiguous beat, an unreadable sign — say so
   rather than smoothing it over.
+
+### When a detail decides the description, crop in
+
+Sheet cells are ~500px wide — enough to identify a person, not always enough to place them. When
+a background figure's role, a sign's wording or a prop's identity actually changes what you would
+write, re-extract at source resolution rather than guessing from the tile:
+
+```bash
+scripts/zoom.sh <workdir> 0.2,1.2,3.3 left      # region: left|right|top|bottom|tl|tr|bl|br|centre
+scripts/zoom.sh <workdir> 12.4 "iw*0.3:ih*0.4:iw*0.1:ih*0.2"   # or a raw crop
+```
+
+Comma-separated times are tiled into one sheet, so you can check the same region across a shot
+and see whether the figure moves or stays put — which is often what settles it.
 
 ### Writing the shots well
 
