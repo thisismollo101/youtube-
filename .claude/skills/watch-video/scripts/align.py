@@ -78,6 +78,45 @@ def pick_threshold(scores):
 DEFAULT_THRESHOLD = 0.30
 NOISE_FLOOR = 0.05
 MIN_GAP_RATIO = 2.0
+SOFT_GATE = 0.05        # frames below this are noise, not part of a transition
+SOFT_LINK = 0.25        # frames closer than this belong to the same run
+SOFT_MIN_SPAN = 0.08    # a run shorter than this is a hard cut plus its echo
+
+
+def find_soft_transitions(scores, thr, hard_cuts):
+    """Find whip-pans, blur wipes and tilt-through-sky joins between setups.
+
+    A hard cut is one frame of large change. A hidden transition is the
+    opposite shape: several consecutive frames of *moderate* change, because
+    the blurred or uniform frames in the middle resemble each other. Neither
+    half ever crosses the cut threshold, so the shot list silently merges two
+    completely different setups into one shot.
+
+    These are common in brand films that morph between locations, so they are
+    reported rather than ignored — but not split on automatically, since fast
+    action inside a single shot produces the same signature.
+    """
+    pts = sorted((t, s) for t, s in scores if s >= SOFT_GATE)
+    runs, cur = [], []
+    for t, s in pts:
+        if cur and t - cur[-1][0] > SOFT_LINK:
+            runs.append(cur); cur = []
+        cur.append((t, s))
+    if cur:
+        runs.append(cur)
+
+    out = []
+    for run in runs:
+        peak_t, peak_s = max(run, key=lambda x: x[1])
+        span = run[-1][0] - run[0][0]
+        if peak_s >= thr:
+            continue                                    # already a hard cut
+        if len(run) < 2 or span < SOFT_MIN_SPAN:
+            continue                                    # single blip
+        if any(abs(peak_t - c) < 0.5 for c in hard_cuts):
+            continue                                    # trailing echo of a cut
+        out.append((peak_t, peak_s, span, len(run)))
+    return out
 
 
 def cmd_shots(a):
@@ -99,8 +138,12 @@ def cmd_shots(a):
 
     cuts = [t for t, s in scores if s > thr]
     shots = build_shots(cuts, a.duration, a.min_dur)
-    with open(os.path.join(os.path.dirname(a.out), "threshold.txt"), "w") as fh:
+    d = os.path.dirname(a.out)
+    with open(os.path.join(d, "threshold.txt"), "w") as fh:
         fh.write(f"{thr:.4f}\t{why}\n")
+    with open(os.path.join(d, "soft.tsv"), "w") as fh:
+        for t, pk, span, n in find_soft_transitions(scores, thr, cuts):
+            fh.write(f"{t:.3f}\t{pk:.3f}\t{span:.3f}\t{n}\n")
     with open(a.out, "w") as fh:
         for idx, start, end in shots:
             fh.write(f"{idx}\t{start:.3f}\t{end:.3f}\t{end - start:.3f}\n")
@@ -240,6 +283,27 @@ def cmd_report(a):
             w(f"## {label} — {len(names)} file(s)\n")
             for n in names:
                 w(f"- {a.workdir}/{n}\n")
+            w("\n")
+
+        soft = []
+        sp = os.path.join(a.workdir, "soft.tsv")
+        if os.path.exists(sp):
+            for line in open(sp):
+                f = line.split("\t")
+                if len(f) == 4:
+                    soft.append((float(f[0]), float(f[1]), float(f[2]), int(f[3])))
+        if soft:
+            w("## Possible hidden transitions — CHECK THESE\n\n")
+            w("Sustained moderate change with no single frame crossing the cut threshold. That is\n")
+            w("the signature of a whip-pan, blur wipe or tilt-through-sky join between two setups,\n")
+            w("which scene detection cannot see because the blurred middle frames resemble each\n")
+            w("other. If one is real, the shot it sits inside is actually two different setups —\n")
+            w("often a different location, wardrobe and time of day — and the breakdown must say so.\n")
+            w("Fast action inside a single shot looks the same, so verify each one:\n\n")
+            for t, pk, span, n in soft:
+                shot = next((i for i, s0, e0, _ in shots if s0 <= t < e0), "?")
+                w(f"- **{fmt(t)}** inside shot {shot} — peak {pk:.3f} over {span:.2f}s ({n} frames)\n")
+                w(f"  - `scripts/zoom.sh {a.workdir} {t-0.25:.2f},{t-0.1:.2f},{t:.2f},{t+0.1:.2f},{t+0.25:.2f} full`\n")
             w("\n")
 
         if a.capped_note:

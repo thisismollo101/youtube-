@@ -40,6 +40,10 @@ optional fallback used only when a video has no captions.
 5. **Transcribe** — platform captions if they exist, `whisper-cli` if not, and an explicit "none"
    rather than silence when neither is available.
 6. **Align** — caption cues are assigned to shots by timestamp overlap into `dialogue.md`.
+7. **Flag hidden transitions** — a hard cut is one frame of large change; a whip-pan or sky wipe
+   is several frames of moderate change, and never crosses the cut threshold. Those runs are
+   reported in the manifest with a ready-made `zoom.sh` command, because a missed one silently
+   merges two entirely different setups into a single shot.
 
 ## Two things that matter
 

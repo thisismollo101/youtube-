@@ -22,7 +22,14 @@ install line. Do not fall back to improvising ffmpeg commands.
 
 ## Step 2 — Read the output in this order
 
-1. **`manifest.md`** — shot list, measured cut statistics, sheet paths.
+1. **`manifest.md`** — shot list, measured cut statistics, sheet paths, and any **possible
+   hidden transitions**. If that section is present, resolve it before writing anything: each
+   entry is a candidate whip-pan, blur wipe or tilt-through-sky join that scene detection cannot
+   see, because the blurred middle frames resemble each other. Run the `zoom.sh` line printed
+   with each one. If the frames either side show a different location, wardrobe or time of day,
+   that shot is really two setups and must be broken out as two in your output — note the
+   transition and what carries across it, since a matched prop or framing is usually the whole
+   trick. If it is just fast action inside one shot, say so and move on.
 2. **`cast/sheet_*.jpg`** — one frame per shot. Read these *before* the shot sheets and fix a
    stable label for every recurring person. Use their real name if it is spoken or on screen,
    otherwise a descriptive handle (`Woman A — dark curly hair, red apron`). Keep those labels
