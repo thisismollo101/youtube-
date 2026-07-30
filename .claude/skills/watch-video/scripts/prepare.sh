@@ -7,7 +7,8 @@
 # Prints the manifest path on the last line. Tunables:
 #   WV_THRESHOLD  scene-detection sensitivity      (default: auto-calibrated)
 #   WV_MIN_SHOT   merge shots shorter than this    (default 0.40s)
-#   WV_MAX_SHEETS cap on 3-frame shot sheets       (default 20)
+#   WV_MAX_SHEETS overall frame budget, in sheets   (default 20)
+#   WV_SEC_PER_FRAME seconds of shot per sampled frame (default 1.2)
 #   WHISPER_MODEL ggml model path for the fallback transcript
 set -euo pipefail
 
@@ -18,6 +19,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 THRESHOLD="${WV_THRESHOLD:-auto}"
 MIN_SHOT="${WV_MIN_SHOT:-0.40}"
 MAX_SHEETS="${WV_MAX_SHEETS:-20}"
+SEC_PER_FRAME="${WV_SEC_PER_FRAME:-1.2}"   # one sampled frame per this many seconds of shot
 
 CELL_W=500        # shot-sheet cell width; the legibility floor found by testing
 CAST_W=300        # cast-sheet cells can be smaller — identify, not read
@@ -51,8 +53,9 @@ if [ -z "$WORK" ]; then
   SLUG=$(printf '%s' "$SRC" | tr -c 'A-Za-z0-9' '-' | cut -c1-40)
   WORK="${TMPDIR:-/tmp}/watch-video/${SLUG}-$$"
 fi
-mkdir -p "$WORK"/{shots_src,cast_src,shots,cast}
-rm -f "$WORK"/shots_src/* "$WORK"/cast_src/* "$WORK"/shots/* "$WORK"/cast/* 2>/dev/null || true
+mkdir -p "$WORK"/{frames,cast_src,shots,cast}
+rm -rf "$WORK"/frames/* 2>/dev/null || true
+rm -f "$WORK"/cast_src/* "$WORK"/shots/* "$WORK"/cast/* 2>/dev/null || true
 
 # ---------------------------------------------------------------- acquire
 echo "[1/6] fetching" >&2
@@ -125,17 +128,29 @@ THRESHOLD_WHY=$(cut -f2 "$WORK/threshold.txt" 2>/dev/null || echo "")
 echo "      $SHOT_COUNT shots (threshold $THRESHOLD_USED — $THRESHOLD_WHY)" >&2
 
 # ------------------------------------------------------- pick sampling plan
-MAX_3F=$(( MAX_SHEETS * ROWS ))
+# Frames per shot follow the shot's own length. A fixed count per shot spends
+# the budget backwards: a 9.7s shot and a 1.1s insert get identical coverage,
+# so the shot carrying the most action is the one seen least.
+PER_SHEET=$(( 3 * ROWS ))                       # frames one sheet can hold
+MAX_FRAMES=$(( MAX_SHEETS * PER_SHEET ))
+awk -F'\t' -v spf="$SEC_PER_FRAME" -v maxf="$MAX_FRAMES" '
+  { idx[NR]=$1; st[NR]=$2; en[NR]=$3; du[NR]=$4
+    n=int(du[NR]/spf + 0.5); if(n<2)n=2; if(n>12)n=12; nf[NR]=n; tot+=n }
+  END{
+    # Over budget: scale every shot back proportionally but never below 2, so
+    # long shots still keep the largest share rather than being dropped.
+    if (tot > maxf) {
+      f = maxf/tot
+      for(i=1;i<=NR;i++){ n=int(nf[i]*f + 0.5); if(n<2)n=2; nf[i]=n }
+    }
+    for(i=1;i<=NR;i++) printf "%s\t%s\t%s\t%s\t%d\n", idx[i], st[i], en[i], du[i], nf[i]
+  }' "$WORK/shots.tsv" > "$WORK/plan.tsv"
+
+PLANNED=$(awk -F'\t' '{s+=$5} END{print s+0}' "$WORK/plan.tsv")
 CAPPED_NOTE=""
-if [ "$SHOT_COUNT" -gt "$MAX_3F" ]; then
-  # Too many shots for three frames each. Give the full treatment to the longest
-  # shots — the ones carrying the content — and keep every other shot present on
-  # the cast sheets so nothing silently disappears.
-  sort -t$'\t' -k4 -gr "$WORK/shots.tsv" | head -n "$MAX_3F" | sort -t$'\t' -k1 -n > "$WORK/shots_3f.tsv"
-  CAPPED_NOTE="$SHOT_COUNT shots exceeded the $MAX_3F-shot budget for 3-frame sheets. The $MAX_3F longest shots got start/middle/end frames; every shot still appears once on the cast sheets. Raise with WV_MAX_SHEETS."
-  echo "      capping 3-frame sheets at $MAX_3F shots" >&2
-else
-  cp "$WORK/shots.tsv" "$WORK/shots_3f.tsv"
+if [ "$PLANNED" -ge "$MAX_FRAMES" ]; then
+  CAPPED_NOTE="Frame budget reached ($PLANNED of $MAX_FRAMES). Per-shot coverage was scaled back proportionally — long shots keep the most frames, none drop below 2. Raise with WV_MAX_SHEETS or lower WV_SEC_PER_FRAME."
+  echo "      frame budget reached — coverage scaled to $PLANNED frames" >&2
 fi
 
 # ------------------------------------------------------------ build jobs
@@ -143,26 +158,27 @@ label() { awk -v i="$1" -v t="$2" 'BEGIN{printf "S%d  %dm%04.1fs", i, int(t/60),
 
 : > "$WORK/jobs.tsv"
 n=0
-while IFS=$'\t' read -r idx st en du; do
+while IFS=$'\t' read -r idx st en du nf; do
   n=$((n+1))
   mid=$(awk -v s="$st" -v e="$en" 'BEGIN{printf "%.3f", (s+e)/2}')
   printf '%s\t%s\t%s\n' "$mid" "$(label "$idx" "$mid")" \
     "$WORK/cast_src/$(printf 'c_%04d.jpg' "$n")" >> "$WORK/jobs.tsv"
-done < "$WORK/shots.tsv"
 
-m=0
-while IFS=$'\t' read -r idx st en du; do
-  # Nudge off the exact boundary so a frame lands inside the shot, not on the cut.
-  off=$(awk -v d="$du" 'BEGIN{o=d*0.15; if(o>0.20)o=0.20; if(o<0.02)o=0.02; print o}')
-  t1=$(awk -v s="$st" -v o="$off" 'BEGIN{printf "%.3f", s+o}')
-  t2=$(awk -v s="$st" -v e="$en" 'BEGIN{printf "%.3f", (s+e)/2}')
-  t3=$(awk -v e="$en" -v o="$off" 'BEGIN{printf "%.3f", e-o}')
-  for t in "$t1" "$t2" "$t3"; do
-    m=$((m+1))
+  # Each shot gets its own directory so it can be tiled on its own sheet at
+  # whatever grid its frame count needs.
+  SDIR="$WORK/frames/$(printf 'shot_%03d' "$idx")"
+  mkdir -p "$SDIR"
+  # Inset from the boundaries so no frame lands on the cut itself.
+  off=$(awk -v d="$du" 'BEGIN{o=d*0.12; if(o>0.20)o=0.20; if(o<0.02)o=0.02; print o}')
+  awk -v s="$st" -v e="$en" -v o="$off" -v n="$nf" 'BEGIN{
+    a=s+o; b=e-o; if(b<=a){a=(s+e)/2; b=a}
+    for(i=0;i<n;i++) printf "%.3f\n", (n==1? a : a + (b-a)*i/(n-1))
+  }' | while read -r t; do
+    j=$((${j:-0}+1))
     printf '%s\t%s\t%s\n' "$t" "$(label "$idx" "$t")" \
-      "$WORK/shots_src/$(printf 's_%04d.jpg' "$m")" >> "$WORK/jobs.tsv"
+      "$SDIR/$(printf 'f_%03d.jpg' "$j")" >> "$WORK/jobs.tsv"
   done
-done < "$WORK/shots_3f.tsv"
+done < "$WORK/plan.tsv"
 
 echo "[3/6] extracting $(wc -l < "$WORK/jobs.tsv" | tr -d ' ') frames" >&2
 xargs -P 4 -I LINE "$HERE/extract_one.sh" "$WORK" LINE < "$WORK/jobs.tsv"
@@ -171,21 +187,37 @@ xargs -P 4 -I LINE "$HERE/extract_one.sh" "$WORK" LINE < "$WORK/jobs.tsv"
 echo "[4/6] building sheets" >&2
 # Any frame that failed to extract would break the %04d sequence input, so
 # renumber what actually landed before tiling.
+# Width must match the %0Nd pattern the tiling step feeds to ffmpeg, or the
+# image2 demuxer silently finds nothing.
 renumber() {
-  local dir="$1" pre="$2" i=0 f
+  local dir="$1" pre="$2" width="${3:-4}" i=0 f
   for f in $(ls -1 "$dir" 2>/dev/null | sort); do
     i=$((i+1))
-    local want; want=$(printf "%s_%04d.jpg" "$pre" "$i")
+    local want; want=$(printf "%s_%0${width}d.jpg" "$pre" "$i")
     [ "$f" = "$want" ] || mv "$dir/$f" "$dir/$want"
   done
   echo "$i"
 }
-NS=$(renumber "$WORK/shots_src" s)
 NC=$(renumber "$WORK/cast_src" c)
 
-[ "$NS" -gt 0 ] && ffmpeg -nostdin -y -loglevel error -framerate 1 -i "$WORK/shots_src/s_%04d.jpg" \
-  -vf "scale=${CELL_W}:-1,tile=3x${ROWS}:margin=10:padding=8:color=white" \
-  -q:v 3 "$WORK/shots/sheet_%02d.jpg"
+# One sheet per shot, gridded to that shot's frame count, so a long shot reads
+# as a sequence instead of being squeezed into the same row as a 1s insert.
+MAX_COLS=$(awk -v e="$MAX_EDGE" -v c="$CELL_W" 'BEGIN{n=int(e/c); if(n<1)n=1; print n}')
+MAX_ROWS=$(awk -v e="$MAX_EDGE" -v c="$CELL_H" 'BEGIN{n=int(e/c); if(n<1)n=1; print n}')
+: > "$WORK/sheets.tsv"
+for SDIR in "$WORK"/frames/shot_*; do
+  [ -d "$SDIR" ] || continue
+  SID=$(basename "$SDIR")
+  NF=$(renumber "$SDIR" f 3)
+  [ "$NF" -gt 0 ] || continue
+  COLS=$(awk -v n="$NF" -v m="$MAX_COLS" 'BEGIN{print (n<m? n : m)}')
+  ROWS_S=$(awk -v n="$NF" -v c="$COLS" -v m="$MAX_ROWS" 'BEGIN{r=int((n+c-1)/c); if(r>m)r=m; if(r<1)r=1; print r}')
+  ffmpeg -nostdin -y -loglevel error -framerate 1 -i "$SDIR/f_%03d.jpg" \
+    -vf "scale=${CELL_W}:-1,tile=${COLS}x${ROWS_S}:margin=10:padding=8:color=white" \
+    -q:v 3 "$WORK/shots/${SID}_%02d.jpg"
+  printf '%s\t%s\t%sx%s\n' "$SID" "$NF" "$COLS" "$ROWS_S" >> "$WORK/sheets.tsv"
+done
+
 [ "$NC" -gt 0 ] && ffmpeg -nostdin -y -loglevel error -framerate 1 -i "$WORK/cast_src/c_%04d.jpg" \
   -vf "scale=${CAST_W}:-1,tile=${CAST_COLS}x${CAST_ROWS}:margin=10:padding=8:color=white" \
   -q:v 3 "$WORK/cast/sheet_%02d.jpg"

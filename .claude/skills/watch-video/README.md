@@ -29,10 +29,11 @@ optional fallback used only when a video has no captions.
    0.06. A fixed 0.30 reports that second video as one 13-second shot. Fragments under
    `WV_MIN_SHOT` are merged so a flash frame doesn't become five phantom shots, and cut
    statistics come from here, so pacing is measured rather than guessed.
-3. **Sample** — three frames per shot (start / middle / end). One frame per cut cannot show what
-   happens *within* a shot, which is what makes camera movement readable.
-4. **Tile** — frames go onto contact sheets with **one shot per row**, columns left-to-right in
-   time. Geometry is derived from the source aspect ratio.
+3. **Sample** — frames per shot scale with the shot's length (about one per 1.2s, 2–12). A fixed
+   count spends the budget backwards: a 9.7s shot and a 1.1s insert would get identical coverage,
+   so the shot carrying the most action gets seen least.
+4. **Tile** — **one sheet per shot**, gridded to that shot's frame count, so a long shot reads as
+   a sequence. Geometry is derived from the source aspect ratio.
 5. **Transcribe** — platform captions if they exist, `whisper-cli` if not, and an explicit "none"
    rather than silence when neither is available.
 6. **Align** — caption cues are assigned to shots by timestamp overlap into `dialogue.md`.
@@ -65,7 +66,7 @@ source, so you get the same timed-caption quality as a platform download.
 ```
 manifest.md      shot list, measured cut stats, read order
 cast/            one frame per shot — for fixing stable character labels
-shots/           three frames per shot, one shot per row
+shots/           one sheet per shot, frames proportional to shot length
 dialogue.md      every line, assigned to a shot number
 ```
 
@@ -82,7 +83,8 @@ regenerate that shot. The same data is emitted as JSON using the library's field
 |---|---|---|
 | `WV_THRESHOLD` | auto | Auto-calibrated per video. Override only to force a value. |
 | `WV_MIN_SHOT` | `0.40` | Flashes or whip-pans splitting into fragments → raise. |
-| `WV_MAX_SHEETS` | `20` | Long video capped and you want full 3-frame coverage → raise. |
+| `WV_MAX_SHEETS` | `20` | Overall frame budget. Long video scaled back and you want fuller coverage → raise. |
+| `WV_SEC_PER_FRAME` | `1.2` | Seconds of shot per sampled frame. Lower for denser coverage. |
 | `WV_FONT` | auto-detected | No usable system font found. |
 | `WHISPER_MODEL` | `~/.claude/models/ggml-base.en.bin` | Local transcription fallback. |
 
@@ -94,5 +96,6 @@ regenerate that shot. The same data is emitted as JSON using the library's field
   `uncertain` rather than silently guessed.
 - **Camera movement is inferred** from three frames. Static, pan, and push-in read reliably;
   handheld float, slow drift, and speed ramps are judgement calls.
-- **Very long videos are capped.** Past `WV_MAX_SHEETS` sheets the longest shots keep three-frame
-  treatment and the rest appear once on the cast sheets. The manifest says so explicitly.
+- **Very long videos are scaled back.** Past the frame budget every shot's coverage is reduced
+  proportionally, never below 2 frames, so long shots keep the largest share. The manifest says
+  so explicitly.

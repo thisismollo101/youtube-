@@ -74,6 +74,30 @@ Then the same data as JSON, using these exact field names so it can go straight 
 }
 ```
 
+### The bar for the prose
+
+A shot sheet is a **sequence**, not a still. Most of the value is in what changes between the
+first frame and the last, and a breakdown that ignores that is a caption, not a description.
+
+- **Say what changes.** Where does the subject move, what enters or leaves frame, what does the
+  camera do, what is different at the end versus the start? If genuinely nothing changes, say
+  it's a held shot — but check before claiming it. A shot sampled at 8 frames that you describe
+  in one static sentence means you didn't read it.
+- **Never default to "static".** Walking, tracking, whip-pans and reframes are common and easy to
+  miss if you only glance at the first frame. Compare first to last.
+- **Name specifics, not categories.** Props, wardrobe, signage text, gestures, the actual gag.
+  "He balances on a floating lounger, arms out, wobbling" — not "hamming up the perks". Vague
+  summary language is a tell that the shot wasn't looked at.
+- **No boilerplate style clauses.** Do not append the same "clean bright commercial lighting,
+  warm palette, crisp grade, shallow depth of field" to every shot. Mention lighting, grade or
+  lens only where it is a real feature of *that* shot or changes from its neighbours. Repetition
+  across shots is padding.
+- **Carry continuity between shots.** Props and actions often continue across a cut — a whip-pan
+  out of one shot and into the next, an object carried through. Note it; it is exactly what a
+  reskin needs to preserve.
+- **Flag what you couldn't see.** Thin coverage, an ambiguous beat, an unreadable sign — say so
+  rather than smoothing it over.
+
 ### Writing the shots well
 
 - **Description** — one sentence, present tense, the beat of the shot. Match the register of
