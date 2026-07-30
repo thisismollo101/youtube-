@@ -135,9 +135,12 @@ PER_SHEET=$(( 3 * ROWS ))                       # frames one sheet can hold
 MAX_FRAMES=$(( MAX_SHEETS * PER_SHEET ))
 awk -F'\t' -v spf="$SEC_PER_FRAME" -v maxf="$MAX_FRAMES" '
   { idx[NR]=$1; st[NR]=$2; en[NR]=$3; du[NR]=$4
-    # No tight per-shot ceiling: the global budget below handles totals, and it
-    # scales every shot proportionally instead of truncating the longest one.
-    n=int(du[NR]/spf + 0.5); if(n<2)n=2; if(n>40)n=40; nf[NR]=n; tot+=n }
+    # No per-shot ceiling at all. Any cap re-creates the inversion this is meant
+    # to remove: past the cap a long shot silently drops below the nominal rate,
+    # and long shots are the ones that need coverage most. The global budget
+    # below bounds the total, and scales every shot by the same factor rather
+    # than truncating one.
+    n=int(du[NR]/spf + 0.5); if(n<2)n=2; nf[NR]=n; tot+=n }
   END{
     # Over budget: scale every shot back proportionally but never below 2, so
     # long shots still keep the largest share rather than being dropped.

@@ -27,9 +27,12 @@ install line. Do not fall back to improvising ffmpeg commands.
    stable label for every recurring person. Use their real name if it is spoken or on screen,
    otherwise a descriptive handle (`Woman A — dark curly hair, red apron`). Keep those labels
    for the rest of the breakdown so one person doesn't become three across 40 shots.
-3. **`shots/sheet_*.jpg`** — three frames per shot. **Each row is one shot**: left to right is
-   start, middle, end. Compare across a row to read camera movement — a subject growing in frame
-   is a push-in, sliding across is a pan.
+3. **`shots/shot_NNN_*.jpg`** — **one sheet per shot**, read in shot order. Frames run left to
+   right, top to bottom, evenly spaced across that shot at about one per second, so a long shot
+   arrives as a real sequence and a short insert as a couple of stills. A shot needing more
+   frames than one sheet holds continues onto `_02`, `_03`. Read each sheet as a sequence and
+   compare first frame to last: a subject growing in frame is a push-in, sliding across is a
+   pan, and a background that changes throughout means the camera is travelling.
 4. **`dialogue.md`** — every line, already assigned to a shot number.
 
 Each frame carries `S<shot> <time>` burned into the corner. **Read timestamps off the image.**
