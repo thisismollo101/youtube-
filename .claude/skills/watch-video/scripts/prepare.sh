@@ -20,6 +20,9 @@ THRESHOLD="${WV_THRESHOLD:-auto}"
 MIN_SHOT="${WV_MIN_SHOT:-0.40}"
 MAX_SHEETS="${WV_MAX_SHEETS:-20}"
 SEC_PER_FRAME="${WV_SEC_PER_FRAME:-1.0}"   # one sampled frame per this many seconds of shot
+MIN_FRAMES="${WV_MIN_FRAMES:-4}"           # 2 frames give one interval — too few to call a move
+HEAD_WINDOW="${WV_HEAD_WINDOW:-0.5}"       # extra samples inside this much of each shot's head
+SOFT_WINDOW="${WV_SOFT_WINDOW:-1.6}"       # spread of extra samples after a hidden transition
 
 CELL_W=500        # shot-sheet cell width; the legibility floor found by testing
 CAST_W=300        # cast-sheet cells can be smaller — identify, not read
@@ -133,20 +136,20 @@ echo "      $SHOT_COUNT shots (threshold $THRESHOLD_USED — $THRESHOLD_WHY)" >&
 # so the shot carrying the most action is the one seen least.
 PER_SHEET=$(( 3 * ROWS ))                       # frames one sheet can hold
 MAX_FRAMES=$(( MAX_SHEETS * PER_SHEET ))
-awk -F'\t' -v spf="$SEC_PER_FRAME" -v maxf="$MAX_FRAMES" '
+awk -F'\t' -v spf="$SEC_PER_FRAME" -v maxf="$MAX_FRAMES" -v MINF="$MIN_FRAMES" '
   { idx[NR]=$1; st[NR]=$2; en[NR]=$3; du[NR]=$4
     # No per-shot ceiling at all. Any cap re-creates the inversion this is meant
     # to remove: past the cap a long shot silently drops below the nominal rate,
     # and long shots are the ones that need coverage most. The global budget
     # below bounds the total, and scales every shot by the same factor rather
     # than truncating one.
-    n=int(du[NR]/spf + 0.5); if(n<2)n=2; nf[NR]=n; tot+=n }
+    n=int(du[NR]/spf + 0.5); if(n<MINF)n=MINF; nf[NR]=n; tot+=n+2 }   # +2 head samples
   END{
     # Over budget: scale every shot back proportionally but never below 2, so
     # long shots still keep the largest share rather than being dropped.
     if (tot > maxf) {
       f = maxf/tot
-      for(i=1;i<=NR;i++){ n=int(nf[i]*f + 0.5); if(n<2)n=2; nf[i]=n }
+      for(i=1;i<=NR;i++){ n=int(nf[i]*f + 0.5); if(n<MINF)n=MINF; nf[i]=n }
     }
     for(i=1;i<=NR;i++) printf "%s\t%s\t%s\t%s\t%d\n", idx[i], st[i], en[i], du[i], nf[i]
   }' "$WORK/shots.tsv" > "$WORK/plan.tsv"
@@ -175,10 +178,29 @@ while IFS=$'\t' read -r idx st en du nf; do
   mkdir -p "$SDIR"
   # Inset from the boundaries so no frame lands on the cut itself.
   off=$(awk -v d="$du" 'BEGIN{o=d*0.12; if(o>0.20)o=0.20; if(o<0.02)o=0.02; print o}')
-  awk -v s="$st" -v e="$en" -v o="$off" -v n="$nf" 'BEGIN{
-    a=s+o; b=e-o; if(b<=a){a=(s+e)/2; b=a}
-    for(i=0;i<n;i++) printf "%.3f\n", (n==1? a : a + (b-a)*i/(n-1))
-  }' | while read -r t; do
+  {
+    awk -v s="$st" -v e="$en" -v o="$off" -v n="$nf" -v hw="$HEAD_WINDOW" 'BEGIN{
+      a=s+o; b=e-o; if(b<=a){a=(s+e)/2; b=a}
+      for(i=0;i<n;i++) t[i]=(n==1? a : a + (b-a)*i/(n-1))
+      # Crash zooms, whip settles and the first frames of a move nearly all live
+      # in the opening moments of a shot — exactly where an even spread is
+      # thinnest.
+      hb = a + hw; if (hb > b) hb = b
+      if (hb > a) { t[n] = a + (hb-a)/3; t[n+1] = a + 2*(hb-a)/3; n += 2 }
+      for(i=0;i<n;i++) print t[i]
+    }'
+    # A hidden transition starts a new setup mid-shot, so it needs the same head
+    # density as a real cut — otherwise a crash zoom on the far side of a whip
+    # lands in the gap between evenly-spaced samples and is never seen.
+    # A wipe can hold for a while before the new setup resolves — the sky in a
+    # tilt-through-sky join, the blur in a long whip — so this window is much
+    # wider than a normal shot head, and evenly spread rather than front-packed.
+    [ -f "$WORK/soft.tsv" ] && awk -F'\t' -v s="$st" -v e="$en" -v sw="$SOFT_WINDOW" '
+      $1 > s && $1 < e {
+        if ($1 - 0.15 > s) print $1 - 0.15
+        for (i = 1; i <= 4; i++) print $1 + sw*i/4
+      }' "$WORK/soft.tsv" | awk -v e="$en" '$1 < e'
+  } | sort -g | awk 'NR==1 || $1-prev > 0.03 {print; prev=$1}' | while read -r t; do
     j=$((${j:-0}+1))
     printf '%s\t%s\t%s\n' "$t" "$(label "$idx" "$t")" \
       "$SDIR/$(printf 'f_%03d.jpg' "$j")" >> "$WORK/jobs.tsv"

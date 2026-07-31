@@ -29,7 +29,11 @@ optional fallback used only when a video has no captions.
    0.06. A fixed 0.30 reports that second video as one 13-second shot. Fragments under
    `WV_MIN_SHOT` are merged so a flash frame doesn't become five phantom shots, and cut
    statistics come from here, so pacing is measured rather than guessed.
-3. **Sample** — one frame per second of shot, so coverage tracks content. A fixed count per shot
+3. **Sample** — one frame per second of shot, never fewer than 4, so coverage tracks content.
+   Two frames give a single interval — enough to say something changed, not enough to say what
+   moved — so short shots get a floor. Extra samples go into the first half-second of each shot
+   and across a wider window after any hidden transition, because crash zooms and whip settles
+   live exactly there and fall between evenly-spaced samples otherwise. A fixed count per shot
    spends the budget backwards: a 9.7s shot and a 1.1s insert would get identical coverage, so
    the shot carrying the most action gets seen least. There is deliberately no per-shot ceiling:
    any cap re-creates the same inversion on long takes, where a shot silently drops below the
@@ -92,6 +96,9 @@ regenerate that shot. The same data is emitted as JSON using the library's field
 | `WV_MIN_SHOT` | `0.40` | Flashes or whip-pans splitting into fragments → raise. |
 | `WV_MAX_SHEETS` | `20` | The only real limit on coverage — a budget in sheets (i.e. images to read). Raise for long videos. |
 | `WV_SEC_PER_FRAME` | `1.0` | Seconds of shot per sampled frame. Lower for denser coverage. |
+| `WV_MIN_FRAMES` | `4` | Floor per shot. Below 4 a slow slider is indistinguishable from a locked frame. |
+| `WV_HEAD_WINDOW` | `0.5` | Window at each shot's head given extra samples. |
+| `WV_SOFT_WINDOW` | `1.6` | Spread of extra samples after a detected hidden transition. |
 | `WV_FONT` | auto-detected | No usable system font found. |
 | `WHISPER_MODEL` | `~/.claude/models/ggml-base.en.bin` | Local transcription fallback. |
 
@@ -101,9 +108,11 @@ regenerate that shot. The same data is emitted as JSON using the library's field
   from who is on screen and whose mouth is moving. Reliable for one visible speaker, weak for
   off-screen narration and overlapping voices. Lines are tagged `on-screen` / `voiceover` /
   `uncertain` rather than silently guessed.
-- **Camera movement is inferred** from the frames sampled across a shot, not measured. Static,
-  pan, push-in and travelling moves read reliably at one frame per second; handheld float, slow
-  drift and speed ramps remain judgement calls.
+- **Camera movement is inferred** from the frames sampled across a shot, not measured. It is the
+  most error-prone part of the output, and the errors run one way: movement gets called as
+  locked-off. Sub-second shots and moves that start mid-shot are the hard cases — the frame floor
+  and head-window sampling exist specifically to make them readable. Handheld float, slow drift
+  and speed ramps remain judgement calls.
 - **Very long videos are scaled back.** Past the frame budget every shot's coverage is reduced
   proportionally, never below 2 frames, so long shots keep the largest share. The manifest says
   so explicitly.

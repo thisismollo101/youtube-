@@ -93,8 +93,18 @@ first frame and the last, and a breakdown that ignores that is a caption, not a 
   camera do, what is different at the end versus the start? If genuinely nothing changes, say
   it's a held shot — but check before claiming it. A shot sampled at 8 frames that you describe
   in one static sentence means you didn't read it.
-- **Never default to "static".** Walking, tracking, whip-pans and reframes are common and easy to
-  miss if you only glance at the first frame. Compare first to last.
+- **Name the camera move, and show your evidence.** Pick from: locked-off, pan, tilt, whip pan,
+  push-in, pull-out, crash zoom, dolly, reverse track, slider, crane, handheld. State which frames
+  show it. "Locked-off" is a positive claim needing the same evidence as any other — it is not the
+  default when frames look similar, and defaulting to it is the single most common error this
+  skill makes.
+  - **The parallax test tells translation from zoom.** If foreground and background shift by
+    *different* amounts, the camera moved through space — dolly, slider, track. If everything
+    scales about the centre together, it zoomed. If the frame swings about a point with no
+    parallax, it panned or tilted. A slow slider looks like a locked-off frame until you compare
+    a foreground object against the back wall.
+  - **Subject holding constant size while the background slides past means the camera is moving
+    with them** — a tracking or reverse-tracking shot, not a static frame with a walking subject.
 - **Name specifics, not categories.** Props, wardrobe, signage text, gestures, the actual gag.
   "He balances on a floating lounger, arms out, wobbling" — not "hamming up the perks". Vague
   summary language is a tell that the shot wasn't looked at.
